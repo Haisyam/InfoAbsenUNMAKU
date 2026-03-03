@@ -1,0 +1,17 @@
+[
+  {
+    "id": "cloud-computing-c",
+    "name": "Cloud Computing C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99891",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Selasa",
+      "start": "13:00",
+      "end": "14:30",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  }
+]

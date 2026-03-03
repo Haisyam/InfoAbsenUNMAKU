@@ -1,0 +1,137 @@
+[
+  {
+    "id": "komputasi-paralel-dan-terdistribusi-c",
+    "name": "Komputasi Paralel dan Terdistribusi C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99890",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Senin",
+      "start": "14:31",
+      "end": "16:00",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  },
+  {
+    "id": "aplikasi-berbasis-platform-c",
+    "name": "Aplikasi Berbasis Platform C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99888",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Senin",
+      "start": "13:00",
+      "end": "14:30",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  },
+  {
+    "id": "cloud-computing-c",
+    "name": "Cloud Computing C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99891",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Selasa",
+      "start": "13:00",
+      "end": "14:30",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  },
+  {
+    "id": "big-data-c",
+    "name": "Big Data C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99892",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Selasa",
+      "start": "14:30",
+      "end": "16:45",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  },
+  {
+    "id": "systems-analysis-and-design-c",
+    "name": "Systems Analysis and Design C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99894",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Rabu",
+      "start": "13:00",
+      "end": "15:15",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  },
+  {
+    "id": "statistika-dan-probabilitas-c",
+    "name": "Statistika dan Probabilitas C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99893",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Rabu",
+      "start": "15:16",
+      "end": "16:45",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  },
+  {
+    "id": "pengantar-kecerdasan-buatan-c",
+    "name": "Pengantar Kecerdasan Buatan C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99895",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Kamis",
+      "start": "08:00",
+      "end": "10:15",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  },
+  {
+    "id": "grafika-komputer-c",
+    "name": "Grafika Komputer C",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99889",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Kamis",
+      "start": "10:15",
+      "end": "11:45",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 15,
+      "graceAfterMinutes": 30
+    }
+  },
+  {
+    "id": "cloud-computing-c-demo-now",
+    "name": "Cloud Computing C (Demo Jam Sekarang)",
+    "url": "https://simakng.unma.ac.id/publik/absensi/99891",
+    "nim": "2414101091",
+    "nameMatch": "Muhamad Haisyam Khairizmi",
+    "schedule": {
+      "day": "Rabu",
+      "start": "00:00",
+      "end": "23:59",
+      "timezone": "Asia/Jakarta",
+      "graceBeforeMinutes": 0,
+      "graceAfterMinutes": 0
+    }
+  }
+]
