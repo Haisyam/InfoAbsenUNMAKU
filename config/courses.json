@@ -128,7 +128,7 @@
     "schedule": {
       "day": "Rabu",
       "start": "00:00",
-      "end": "23:59",
+      "end": "01:59",
       "timezone": "Asia/Jakarta",
       "graceBeforeMinutes": 0,
       "graceAfterMinutes": 0
