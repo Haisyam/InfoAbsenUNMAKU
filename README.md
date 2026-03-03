@@ -21,6 +21,8 @@ Lalu edit:
 - `config/courses.json` untuk daftar matkul/link absensi.
 - `NOTIFY_MODE=critical` jika hanya ingin status bermasalah, atau `NOTIFY_MODE=all` untuk semua perubahan.
 - `TELEGRAM_ENABLE_BOT=true` untuk aktifkan command bot (`/start`, `/info`) dan tombol `Rekap Absensi`.
+- `NOTIFIER_CHANNEL=telegram|whatsapp|both` untuk channel notifikasi.
+- Jika pakai WA: aktifkan `WHATSAPP_ENABLE=true` dan isi `WHATSAPP_TARGETS`.
 
 ## 3) Jalankan
 
@@ -72,6 +74,18 @@ Keterangan:
 - Jika `NOTIFY_MODE=all`, semua perubahan/new pertemuan akan dikirim.
 - Tidak spam berulang untuk event status yang sama (ada dedup di `state/state.json`).
 - Saat `DRY_RUN=true`, pesan hanya dicetak ke console (tidak kirim ke Telegram).
+
+## WhatsApp via Baileys
+
+- Install dependency sudah termasuk `@whiskeysockets/baileys`.
+- Atur env:
+  - `WHATSAPP_ENABLE=true`
+  - `WHATSAPP_TARGETS=628xxxxxxxxxx`
+  - `NOTIFIER_CHANNEL=whatsapp` atau `both`
+- Jalankan `npm start`, lalu scan QR di terminal ke WhatsApp Linked Devices.
+- Session login disimpan di `state/wa_auth`.
+- Command WA yang tersedia (private chat): `info`, `rekap`, `/info`, `/rekap`, `menu`.
+- Batasi pengirim command lewat `WHATSAPP_ALLOWED_SENDERS` jika perlu.
 
 ## Command bot Telegram
 
