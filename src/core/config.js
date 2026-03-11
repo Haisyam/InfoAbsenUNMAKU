@@ -42,4 +42,9 @@ export const appConfig = {
   WHATSAPP_ALLOWED_SENDERS: parseList(process.env.WHATSAPP_ALLOWED_SENDERS),
   WHATSAPP_AUTH_DIR: process.env.WHATSAPP_AUTH_DIR || path.join(ROOT, 'state', 'wa_auth'),
   WHATSAPP_COMMAND_ENABLE: parseBoolean(process.env.WHATSAPP_COMMAND_ENABLE, true),
+  WHATSAPP_ADMIN_NUMBER: process.env.WHATSAPP_ADMIN_NUMBER || '',
+  WHATSAPP_ADMIN_LID: parseList(process.env.WHATSAPP_ADMIN_LID),
+
+  MONGODB_URI: process.env.MONGODB_URI || '',
+  MONGODB_DB_NAME: process.env.MONGODB_DB_NAME || 'ProjekSaya',
 };

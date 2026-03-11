@@ -102,7 +102,7 @@ export function isWithinScheduleWindow(course, defaultTimezone, date = new Date(
   return { active: false, reason: 'outside-window' };
 }
 
-export async function fetchCourseSnapshot(course, nowIso) {
+export async function fetchCourseSnapshot(course, nowIso, dbTargets = []) {
   const response = await axios.get(course.url, {
     timeout: 20_000,
     headers: {
@@ -114,42 +114,80 @@ export async function fetchCourseSnapshot(course, nowIso) {
   const $ = cheerio.load(response.data);
   const rows = $('table tbody tr');
 
-  let target = null;
-  rows.each((_, row) => {
-    const cells = $(row).find('td');
-    if (cells.length < 3) return;
+  // course.students disiapkan formatnya: [{nim, nameMatch}, ...]
+  // jika masih pakai format lama (course.nim, course.nameMatch), konversi otomatis
+  let targetStudents = Array.isArray(course.students) 
+    ? [...course.students] 
+    : [{ nim: course.nim, nameMatch: course.nameMatch }];
 
-    const nim = $(cells[0]).text().trim();
-    const name = $(cells[1]).text().trim();
-
-    const nimMatch = course.nim && nim === String(course.nim).trim();
-    const nameMatch = course.nameMatch && normalizeName(name) === normalizeName(course.nameMatch);
-    if (nimMatch || nameMatch) {
-      target = { nim, name, badgesCell: cells[2] };
-      return false;
+  // Gabungkan dbTargets jika ada (menambahkan nim target WA yang terdaftar)
+  if (dbTargets && dbTargets.length > 0) {
+    for (const dbt of dbTargets) {
+      if (dbt.nim && !targetStudents.find(t => t.nim === dbt.nim)) {
+        targetStudents.push({ nim: dbt.nim, nameMatch: dbt.name });
+      }
     }
-    return undefined;
-  });
-
-  if (!target) {
-    throw new Error(`Mahasiswa tidak ditemukan pada ${course.name} (nim=${course.nim || '-'}, name=${course.nameMatch || '-'})`);
   }
 
-  const statusesByMeeting = {};
-  $(target.badgesCell).find('.badge').each((_, badge) => {
-    const meeting = toNumber($(badge).text().replace(/\s+/g, ' ').trim());
-    if (!meeting) return;
+  const snapshotStudents = {};
+  let globalMaxMeeting = 0;
 
-    const classes = ($(badge).attr('class') || '').split(/\s+/).filter(Boolean);
-    const badgeClass = classes.find((c) => c.startsWith('bg-'));
-    statusesByMeeting[String(meeting)] = STATUS_BY_BADGE_CLASS[badgeClass] || 'Unknown';
-    return undefined;
-  });
+  for (const stu of targetStudents) {
+    let targetCell = null;
+    let foundNim = '';
+    let foundName = '';
+
+    rows.each((_, row) => {
+      const cells = $(row).find('td');
+      if (cells.length < 3) return;
+
+      const nim = $(cells[0]).text().trim();
+      const name = $(cells[1]).text().trim();
+
+      const nimMatch = stu.nim && nim === String(stu.nim).trim();
+      const nameMatch = stu.nameMatch && normalizeName(name) === normalizeName(stu.nameMatch);
+      if (nimMatch || nameMatch) {
+        targetCell = cells[2];
+        foundNim = nim;
+        foundName = name;
+        return false; // stop jQuery each
+      }
+      return undefined;
+    });
+
+    if (!targetCell) {
+      console.warn(`⚠️ [WARNING] Mahasiswa tidak ditemukan pada ${course.name} (nim=${stu.nim || '-'}, name=${stu.nameMatch || '-'})`);
+      continue;
+    }
+
+    const statusesByMeeting = {};
+    $(targetCell).find('.badge').each((_, badge) => {
+      const meeting = toNumber($(badge).text().replace(/\s+/g, ' ').trim());
+      if (!meeting) return;
+
+      const classes = ($(badge).attr('class') || '').split(/\s+/).filter(Boolean);
+      const badgeClass = classes.find((c) => c.startsWith('bg-'));
+      statusesByMeeting[String(meeting)] = STATUS_BY_BADGE_CLASS[badgeClass] || 'Unknown';
+    });
+
+    const maxMeeting = Object.keys(statusesByMeeting).reduce((acc, k) => Math.max(acc, Number(k)), 0);
+    globalMaxMeeting = Math.max(globalMaxMeeting, maxMeeting);
+
+    snapshotStudents[foundNim] = {
+      nim: foundNim,
+      name: foundName,
+      statusesByMeeting,
+      maxMeeting,
+    };
+  }
+
+  if (Object.keys(snapshotStudents).length === 0) {
+    throw new Error(`Tidak ada satupun mahasiswa yang ditemukan pada course ${course.name}`);
+  }
 
   return {
-    student: { nim: target.nim, name: target.name },
-    statusesByMeeting,
-    maxMeeting: Object.keys(statusesByMeeting).reduce((acc, k) => Math.max(acc, Number(k)), 0),
+    students: snapshotStudents,
+    maxMeeting: globalMaxMeeting,
     fetchedAt: nowIso(),
   };
 }
@@ -168,27 +206,39 @@ export function selectLatestEvent(events) {
   return [...events].sort((a, b) => Number(b.meeting) - Number(a.meeting))[0];
 }
 
-export function diffSnapshot(prev = { statusesByMeeting: {} }, next, course) {
-  const prevStatuses = prev.statusesByMeeting || {};
-  const nextStatuses = next.statusesByMeeting || {};
+export function diffSnapshot(prev = { students: {} }, next, course) {
+  const prevStudents = prev.students || {};
+  const nextStudents = next.students || {};
+  const allEvents = [];
 
-  const allMeetings = new Set([...Object.keys(prevStatuses), ...Object.keys(nextStatuses)]);
-  const events = [...allMeetings]
-    .sort((a, b) => Number(a) - Number(b))
-    .flatMap((meeting) => {
-      const oldStatus = prevStatuses[meeting];
-      const newStatus = nextStatuses[meeting];
+  for (const [nim, nextStuInfo] of Object.entries(nextStudents)) {
+    const prevStuInfo = prevStudents[nim] || { statusesByMeeting: {} };
+    
+    const prevStatuses = prevStuInfo.statusesByMeeting || {};
+    const nextStatuses = nextStuInfo.statusesByMeeting || {};
 
-      if (!oldStatus && newStatus) {
-        return [{ type: 'new', meeting, oldStatus: null, newStatus, critical: isCritical(newStatus) }];
-      }
-      if (oldStatus && newStatus && oldStatus !== newStatus) {
-        return [{ type: 'changed', meeting, oldStatus, newStatus, critical: isCritical(newStatus) }];
-      }
-      return [];
-    });
+    const allMeetings = new Set([...Object.keys(prevStatuses), ...Object.keys(nextStatuses)]);
+    const stuEvents = [...allMeetings]
+      .sort((a, b) => Number(a) - Number(b))
+      .flatMap((meeting) => {
+        const oldStatus = prevStatuses[meeting];
+        const newStatus = nextStatuses[meeting];
 
-  return events.map((e) => ({ ...e, course: course.name, url: course.url }));
+        if (!oldStatus && newStatus) {
+          return [{ type: 'new', meeting, oldStatus: null, newStatus, critical: isCritical(newStatus) }];
+        }
+        if (oldStatus && newStatus && oldStatus !== newStatus) {
+          return [{ type: 'changed', meeting, oldStatus, newStatus, critical: isCritical(newStatus) }];
+        }
+        return [];
+      });
+
+    for (const e of stuEvents) {
+      allEvents.push({ ...e, course: course.name, url: course.url, student: { nim, name: nextStuInfo.name } });
+    }
+  }
+
+  return allEvents;
 }
 
 export function formatNotificationMessage(event, student) {
@@ -208,15 +258,14 @@ export function formatNotificationMessage(event, student) {
     statusLine,
     changeLine,
     `🔗 ${event.url}`,
-    `⏱️ ${new Date().toLocaleString('id-ID')}`,
+    `⏱️ ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
   ].join('\n');
 }
-
-export async function refreshAllSnapshots(config, state, nowIso) {
+export async function refreshAllSnapshots(config, state, nowIso, dbTargets = []) {
   for (const course of config) {
     const key = course.id || course.name;
     try {
-      const snapshot = await fetchCourseSnapshot(course, nowIso);
+      const snapshot = await fetchCourseSnapshot(course, nowIso, dbTargets);
       state.courses[key] = snapshot;
       console.log(`[${nowIso()}] ${course.name}: refresh rekap ok (pertemuan=${snapshot.maxMeeting})`);
     } catch (error) {
@@ -228,17 +277,49 @@ export async function refreshAllSnapshots(config, state, nowIso) {
 
 function summarizeCourse(snapshot) {
   const counter = { alfa: 0, izin: 0, sakit: 0 };
-  for (const status of Object.values(snapshot?.statusesByMeeting || {})) {
-    const normalized = String(status || '').toLowerCase();
-    if (normalized === 'alfa') counter.alfa += 1;
-    if (normalized === 'izin') counter.izin += 1;
-    if (normalized === 'sakit') counter.sakit += 1;
+  for (const stuInfo of Object.values(snapshot?.students || {})) {
+    for (const status of Object.values(stuInfo.statusesByMeeting || {})) {
+      const normalized = String(status || '').toLowerCase();
+      if (normalized === 'alfa') counter.alfa += 1;
+      if (normalized === 'izin') counter.izin += 1;
+      if (normalized === 'sakit') counter.sakit += 1;
+    }
   }
   return counter;
 }
 
-export function buildRecapMessage(config, state) {
-  const lines = ['📊 REKAP ABSENSI (tanpa Hadir)', `⏱️ ${new Date().toLocaleString('id-ID')}`, ''];
+export function buildRecapMessage(config, state, targetNims = null) {
+  const lines = [];
+
+  let studentName = null;
+  let studentNim = null;
+
+  if (targetNims && targetNims.length > 0) {
+    for (const course of config) {
+      const key = course.id || course.name;
+      const snapshot = state.courses[key];
+      if (snapshot && snapshot.students) {
+        for (const stu of Object.values(snapshot.students)) {
+           if (targetNims.includes(stu.nim)) {
+             studentName = stu.name;
+             studentNim = stu.nim;
+             break;
+           }
+        }
+      }
+      if (studentName) break;
+    }
+  }
+
+  lines.push('*REKAP ABSENSI*');
+  if (studentName) {
+    lines.push(`Nama: ${studentName}`);
+    lines.push(`NPM: ${studentNim}`);
+  } else {
+    lines.push('(Seluruh Mahasiswa)');
+  }
+  lines.push(`Waktu: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`);
+  lines.push('--------------------------------');
 
   let totalAlfa = 0;
   let totalIzin = 0;
@@ -246,27 +327,63 @@ export function buildRecapMessage(config, state) {
 
   for (const course of config) {
     const key = course.id || course.name;
-    const snapshot = state.courses[key];
+    if (course.hideFromRecap || key.includes('-demo-')) continue;
 
+    const snapshot = state.courses[key];
     if (!snapshot) {
-      lines.push(`• ${course.name}`);
-      lines.push('  data belum tersedia');
-      lines.push('');
+      if (!studentName) {
+        lines.push(`* ${course.name}`);
+        lines.push('  (data belum tersedia)');
+        lines.push('');
+      }
       continue;
     }
 
-    const stats = summarizeCourse(snapshot);
-    totalAlfa += stats.alfa;
-    totalIzin += stats.izin;
-    totalSakit += stats.sakit;
+    const studentsToDisplay = [];
+    for (const stuInfo of Object.values(snapshot.students || {})) {
+      if (targetNims && targetNims.length > 0 && !targetNims.includes(stuInfo.nim)) {
+        continue;
+      }
+      
+      let stuAlfa = 0, stuIzin = 0, stuSakit = 0;
+      for (const status of Object.values(stuInfo.statusesByMeeting || {})) {
+         const normalized = String(status || '').toLowerCase();
+         if (normalized === 'alfa') stuAlfa += 1;
+         if (normalized === 'izin') stuIzin += 1;
+         if (normalized === 'sakit') stuSakit += 1;
+      }
+      
+      totalAlfa += stuAlfa;
+      totalIzin += stuIzin;
+      totalSakit += stuSakit;
 
-    lines.push(`• ${course.name}`);
-    lines.push(`  🚨 Alfa: ${stats.alfa} | 🟦 Izin: ${stats.izin} | 🤒 Sakit: ${stats.sakit}`);
-    lines.push(`  🧾 Pertemuan tercatat: ${snapshot.maxMeeting || 0}`);
+      const hasBadStatus = stuAlfa > 0 || stuIzin > 0 || stuSakit > 0;
+      if (hasBadStatus || targetNims) {
+        if (studentName) {
+            studentsToDisplay.push(`  Alfa: ${stuAlfa} | Izin: ${stuIzin} | Sakit: ${stuSakit}`);
+        } else {
+            studentsToDisplay.push(`  - ${stuInfo.name.split(' ')[0]} -> Alfa: ${stuAlfa} | Izin: ${stuIzin} | Sakit: ${stuSakit}`);
+        }
+      }
+    }
+    
+    if (studentName && studentsToDisplay.length === 0) {
+      continue;
+    }
+
+    lines.push(`* ${course.name}`);
+    if (studentsToDisplay.length > 0) {
+      lines.push(...studentsToDisplay);
+    } else {
+      lines.push('  (Aman - Tidak ada absen buruk)');
+    }
+    lines.push(`  Pertemuan: ${snapshot.maxMeeting || 0}`);
     lines.push('');
   }
 
-  lines.push('TOTAL SEMUA MATKUL');
-  lines.push(`🚨 Alfa: ${totalAlfa} | 🟦 Izin: ${totalIzin} | 🤒 Sakit: ${totalSakit}`);
+  lines.push('--------------------------------');
+  lines.push('*Total Akumulasi:*');
+  lines.push(`Alfa: ${totalAlfa} | Izin: ${totalIzin} | Sakit: ${totalSakit}`);
+  
   return lines.join('\n');
 }
