@@ -6,6 +6,8 @@ import makeWASocket, {
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode-terminal';
+import { isAdminJid, handleAdminCommand } from './whatsappAdminCommands.js';
+import { getLidMap, registerLid, resolveJid } from '../db/lidCache.js';
 
 export function normalizeWhatsappNumber(value) {
   if (!value) return '';
@@ -38,20 +40,49 @@ function isPrivateWhatsappJid(jid) {
   return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
 }
 
+/**
+ * Coba resolve LID ke phone JID via socket.onWhatsApp.
+ * Dipanggil sekali saat pertama kali melihat LID baru.
+ */
+async function tryResolveLidFromNumbers(socket, nowIso, numbersToResolve) {
+  for (const num of numbersToResolve) {
+    try {
+      let digits = String(num).replace(/[^\d]/g, '');
+      if (digits.startsWith('0')) digits = `62${digits.slice(1)}`;
+      // onWhatsApp menerima nomor tanpa suffix
+      const results = await socket.onWhatsApp(digits);
+      if (results?.length) {
+        for (const r of results) {
+          if (r.lid && r.jid) {
+            registerLid(r.lid, r.jid);
+            console.log(`[${nowIso()}] [LID] Registered: ${r.lid} → ${r.jid}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[${nowIso()}] [LID] Gagal resolve ${num}: ${err.message}`);
+    }
+  }
+}
+
 export function createWhatsappService({
   config,
   nowIso,
   writeState,
   sendRekap,
+  sendDemo,
 }) {
   let socket = null;
   let reconnectTimer = null;
   let reconnectAttempt = 0;
   let initializing = false;
+  // Set LID yang sudah dicoba resolve agar tidak query berulang
+  const resolvedLids = new Set(getLidMap().keys());
 
   function isAllowedSender(jid) {
     if (config.WHATSAPP_ALLOWED_SENDERS.length === 0) return true;
-    const senderNumber = extractWhatsappNumberFromJid(jid);
+    const resolved = resolveJid(jid);
+    const senderNumber = extractWhatsappNumberFromJid(resolved);
     const allowedNumbers = config.WHATSAPP_ALLOWED_SENDERS
       .map((v) => extractWhatsappNumberFromJid(normalizeWhatsappNumber(v)))
       .filter(Boolean);
@@ -109,6 +140,19 @@ export function createWhatsappService({
 
       socket.ev.on('creds.update', saveCreds);
 
+      // Populate LID map dari data kontak Baileys
+      function populateLidMap(contacts) {
+        for (const c of contacts) {
+          if (c.lid && c.id && !c.id.endsWith('@lid')) {
+            registerLid(c.lid, c.id);
+            resolvedLids.add(c.lid);
+            console.log(`[${nowIso()}] [LID] contacts map: ${c.lid} → ${c.id}`);
+          }
+        }
+      }
+      socket.ev.on('contacts.upsert', populateLidMap);
+      socket.ev.on('contacts.update', populateLidMap);
+
       socket.ev.on('connection.update', async (update) => {
         const { connection, qr, lastDisconnect } = update;
 
@@ -122,6 +166,17 @@ export function createWhatsappService({
           state.whatsappConnected = true;
           writeState(state);
           console.log(`[${nowIso()}] WhatsApp connected`);
+
+          // Lookup LID semua nomor penting (admin + allowed senders)
+          const numbersToResolve = [
+            config.WHATSAPP_ADMIN_NUMBER,
+            ...config.WHATSAPP_ALLOWED_SENDERS,
+          ].filter(Boolean);
+          if (numbersToResolve.length > 0) {
+            setTimeout(() => {
+              tryResolveLidFromNumbers(socket, nowIso, numbersToResolve).catch(() => {});
+            }, 2000); // delay 2 detik setelah connected agar socket siap
+          }
         }
 
         if (connection === 'close') {
@@ -147,31 +202,69 @@ export function createWhatsappService({
       socket.ev.on('messages.upsert', async ({ messages, type }) => {
         if (!config.WHATSAPP_COMMAND_ENABLE) return;
         if (type !== 'notify' && type !== 'append') return;
+
         const message = messages?.[0];
         if (!message || message.key.fromMe) return;
 
-        const jid = String(message.key.remoteJid || '');
-        if (!isPrivateWhatsappJid(jid)) return;
+        const rawJid = String(message.key.remoteJid || '');
+        if (!isPrivateWhatsappJid(rawJid)) return;
+
+        // Jika @lid belum terpetakan, coba resolve dulu via onWhatsApp (lazy)
+        if (rawJid.endsWith('@lid') && !resolvedLids.has(rawJid)) {
+          resolvedLids.add(rawJid); // tandai agar tidak retry terus
+          const numbersToResolve = [
+            config.WHATSAPP_ADMIN_NUMBER,
+            ...config.WHATSAPP_ALLOWED_SENDERS,
+          ].filter(Boolean);
+          await tryResolveLidFromNumbers(socket, nowIso, numbersToResolve);
+        }
+
+        const jid = resolveJid(rawJid); // resolve @lid → @s.whatsapp.net jika ada
+        console.log(`[${nowIso()}] [WA-DEBUG] rawJid=${rawJid} → jid=${jid}`);
+
         if (!isAllowedSender(jid)) {
           console.log(`[${nowIso()}] WhatsApp sender ditolak filter: jid=${jid}`);
           return;
         }
 
-        const text = extractWhatsappText(message.message).toLowerCase().trim();
+        const rawText = extractWhatsappText(message.message);
+        const text = rawText.toLowerCase().trim();
         if (!text) return;
 
-        const isInfoCommand = ['/info', '/rekap', 'info', 'rekap', 'menu'].includes(text);
+        console.log(`[${nowIso()}] WhatsApp pesan masuk: "${text}" dari ${jid}`);
+
+        // === Command Admin ===
+        const senderIsAdmin = isAdminJid(jid, config.WHATSAPP_ADMIN_NUMBER, config.WHATSAPP_ADMIN_LID);
+        console.log(`[${nowIso()}] [WA-DEBUG] senderIsAdmin=${senderIsAdmin} jid=${jid}`);
+
+        if (senderIsAdmin && (text === '/admin' || text === '/demo' || text.startsWith('/target'))) {
+          try {
+            // Kirim ke rawJid agar WA tau kemana harus balas (@lid atau @s.whatsapp.net)
+            const replyJid = rawJid.endsWith('@lid') ? rawJid : jid;
+            await handleAdminCommand({ text, rawText, jid: replyJid, sendMessage, sendDemo });
+          } catch (error) {
+            console.error(`[${nowIso()}] WhatsApp admin command error: ${error.message}`);
+            await sendMessage({ jid: rawJid, text: `❌ Error: ${error.message}` });
+          }
+          return;
+        }
+
+        // === Command Biasa ===
+        const isInfoCommand = ['rekap', 'menu'].includes(text);
         if (!isInfoCommand) return;
 
         try {
           console.log(`[${nowIso()}] WhatsApp command diterima: "${text}" dari ${jid}`);
           if (text === 'menu') {
-            await sendMessage({ jid, text: 'Perintah tersedia: info, rekap, /info, /rekap' });
+            const menuText = senderIsAdmin
+              ? 'Perintah tersedia: rekap\n\n🔐 Admin: /admin'
+              : 'Perintah tersedia: rekap';
+            await sendMessage({ jid: rawJid, text: menuText });
             return;
           }
 
-          await sendMessage({ jid, text: '⏳ Mengambil data rekap terbaru...' });
-          await sendRekap({ channel: 'whatsapp', target: jid, state });
+          await sendMessage({ jid: rawJid, text: '⏳ Mengambil data rekap terbaru...' });
+          await sendRekap({ channel: 'whatsapp', target: jid, replyJid: rawJid, state });
         } catch (error) {
           console.error(`[${nowIso()}] WhatsApp command error: ${error.message}`);
         }
